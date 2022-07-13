@@ -13,6 +13,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.BeanUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -28,7 +30,8 @@ public class DishController {
     private DishFlavorService dishFlavorService;
     @Autowired
     private CategoryService categoryService;
-
+    @Autowired
+    private RedisTemplate redisTemplate;
     /**
      * 新增菜品
      * @param dishDto
@@ -102,6 +105,8 @@ public class DishController {
     public R<String> update(@RequestBody DishDto dishDto) {
         log.info(dishDto.toString());
         dishService.updateWithFlavor(dishDto);
+        String key = "dish_" + dishDto.getCategoryName() + "_" + dishDto.getStatus();
+        redisTemplate.delete(key);
         return R.success("新增菜品成功");
     }
 
@@ -112,6 +117,16 @@ public class DishController {
      */
     @GetMapping("/list")
     public R<List<DishDto>> list(Dish dish) {
+        List<DishDto> dishDtoList = null;
+        String key = "dish" + dish.getCategoryId() + "_" + dish.getStatus();
+        // 先从redis获取缓存数据
+        ValueOperations valueOperations = redisTemplate.opsForValue();
+        dishDtoList = (List<DishDto>) valueOperations.get(key);
+        if (dishDtoList != null) {
+            // 如果存在，直接返回，无需查询数据库
+            return R.success(dishDtoList);
+        }
+
         // 构造查询条件
         LambdaQueryWrapper<Dish> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(dish.getCategoryId() != null, Dish :: getCategoryId, dish.getCategoryId());
@@ -122,7 +137,7 @@ public class DishController {
 
         List<Dish> list = dishService.list(queryWrapper);
 
-        List<DishDto> dishDtoList = list.stream().map((item) ->{
+        dishDtoList = list.stream().map((item) ->{
             DishDto dishDto = new DishDto();
             BeanUtils.copyProperties(item, dishDto);
             Long categoryId = item.getCategoryId();
@@ -140,6 +155,9 @@ public class DishController {
             dishDto.setFlavors(dishFlavorList);
             return dishDto;
         }).collect(Collectors.toList());
+
+        // 如果不存在，需要查询数据库，将查询到的菜品数据缓存到redis
+        valueOperations.set(key, dishDtoList);
     return R.success(dishDtoList);
     }
 }

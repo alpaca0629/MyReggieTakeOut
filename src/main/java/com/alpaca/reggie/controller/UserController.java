@@ -9,6 +9,8 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -17,6 +19,7 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpSession;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 @RestController
 @RequestMapping("/user")
@@ -24,6 +27,8 @@ import java.util.Map;
 public class UserController {
     @Autowired
     private UserService userService;
+    @Autowired
+    private RedisTemplate redisTemplate;
 
     /**
      * 发送手机短信验证码
@@ -41,8 +46,12 @@ public class UserController {
             // 发送短信
             // SMSUtils.sendMessage("外卖", "", phone, code);
             // 需要将生成的验证码保存到Session
-            session.setAttribute("phone", phone);
-            session.setAttribute("code", code);
+//            session.setAttribute("phone", phone);
+//            session.setAttribute("code", code);
+
+            // 将生成的验证码缓存到Redis，并且设置有效期为5分钟
+            ValueOperations valueOperations = redisTemplate.opsForValue();
+            valueOperations.set(phone, code, 5, TimeUnit.MINUTES);
             return R.success("手机验证码短信发送成功");
         }
         return R.error("手机验证码短信发送失败");
@@ -61,12 +70,14 @@ public class UserController {
         // 获取验证码
         String code = map.get("code").toString();
         // 从Session中获取保存的验证码
-        String sessionPhone = (String) session.getAttribute("phone");
-        String sessionCode = (String) session.getAttribute("code");
+//        String sessionPhone = (String) session.getAttribute("phone");
+//        String sessionCode = (String) session.getAttribute("code");
+        // 从redis中获取缓存的验证码
+        ValueOperations valueOperations = redisTemplate.opsForValue();
+        String redisCode = (String) valueOperations.get(phone);
         // 进行验证码比对(页面提交的验证码和Session中的验证码比对)
-        if (sessionCode != null && sessionCode.equals(code)) {
+        if (redisCode != null && redisCode.equals(code)) {
             // 如果能够比对成功，说明登录成功了
-
             LambdaQueryWrapper<User> queryWrapper = new LambdaQueryWrapper<>();
             queryWrapper.eq(User :: getPhone, phone);
             User user = userService.getOne(queryWrapper);
